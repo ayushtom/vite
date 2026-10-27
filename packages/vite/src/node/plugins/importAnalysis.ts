@@ -1,5 +1,4 @@
 import path from 'node:path'
-import fs from 'node:fs'
 import { performance } from 'node:perf_hooks'
 import colors from 'picocolors'
 import MagicString from 'magic-string'
@@ -13,13 +12,13 @@ import { parseAst } from 'rolldown/parseAst'
 import type { StaticImport } from 'mlly'
 import { ESM_STATIC_IMPORT_RE, parseStaticImport } from 'mlly'
 import { makeLegalIdentifier } from '@rollup/pluginutils'
-import type { PartialResolvedId, RollupError } from 'rolldown'
+import type { RollupError } from 'rolldown'
 import type { ESTree } from 'rolldown/utils'
+import { relativeDevUrl, normalizeResolvedIdToUrl } from '../devUrl'
 import {
   CLIENT_DIR,
   CLIENT_PUBLIC_PATH,
   DEP_VERSION_RE,
-  FS_PREFIX,
   SPECIAL_QUERY_RE,
 } from '../constants'
 import {
@@ -104,45 +103,6 @@ interface UrlPosition {
 
 export function isExplicitImportRequired(url: string): boolean {
   return !isJSRequest(url) && !isCSSRequest(url)
-}
-
-function normalizeResolvedIdToUrl(
-  environment: DevEnvironment,
-  url: string,
-  resolved: PartialResolvedId,
-): string {
-  const root = environment.config.root
-  const depsOptimizer = environment.depsOptimizer
-
-  // normalize all imports into resolved URLs
-  // e.g. `import 'foo'` -> `import '/@fs/.../node_modules/foo/index.js'`
-  if (resolved.id.startsWith(withTrailingSlash(root))) {
-    // in root: infer short absolute path from root
-    url = resolved.id.slice(root.length)
-  } else if (
-    depsOptimizer?.isOptimizedDepFile(resolved.id) ||
-    // vite-plugin-react isn't following the leading \0 virtual module convention.
-    // This is a temporary hack to avoid expensive fs checks for React apps.
-    // We'll remove this as soon we're able to fix the react plugins.
-    (resolved.id !== '/@react-refresh' &&
-      path.isAbsolute(resolved.id) &&
-      fs.existsSync(cleanUrl(resolved.id)))
-  ) {
-    // an optimized deps may not yet exists in the filesystem, or
-    // a regular file exists but is out of root: rewrite to absolute /@fs/ paths
-    url = path.posix.join(FS_PREFIX, resolved.id)
-  } else {
-    url = resolved.id
-  }
-
-  // if the resolved id is not a valid browser import specifier,
-  // prefix it to make it valid. We will strip this before feeding it
-  // back into the transform pipeline
-  if (url[0] !== '.' && url[0] !== '/') {
-    url = wrapId(resolved.id)
-  }
-
-  return url
 }
 
 function extractImportedBindings(
@@ -563,6 +523,15 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
             }
             // skip client
             if (specifier === clientPublicPath) {
+              if (!ssr && config.experimental.relativeDevBase) {
+                str().overwrite(
+                  dynamicIndex > -1 ? start : start - 1,
+                  dynamicIndex > -1 ? end : end + 1,
+                  JSON.stringify(
+                    relativeDevUrl(config, specifier, importerModule.url),
+                  ),
+                )
+              }
               return
             }
 
@@ -595,7 +564,10 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
             // See https://github.com/vitejs/vite/issues/9438#issuecomment-1465270409
             config.safeModulePaths.add(fsPathFromUrl(stripBase(url, base)))
 
-            if (url !== specifier) {
+            const browserUrl = ssr
+              ? url
+              : relativeDevUrl(config, url, importerModule.url)
+            if (browserUrl !== specifier) {
               let rewriteDone = false
               // optimizer-emitted imports resolve to the sibling file they
               // name; imports injected by plugins (e.g. @rollup/plugin-inject)
@@ -641,7 +613,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
                   interopNamedImports(
                     str(),
                     importSpecifier,
-                    url,
+                    browserUrl,
                     index,
                     importer,
                     isDynamicImport
@@ -662,7 +634,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
                 interopNamedImports(
                   str(),
                   importSpecifier,
-                  url,
+                  browserUrl,
                   index,
                   importer,
                   isNodeMode(),
@@ -671,7 +643,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
                 rewriteDone = true
               }
               if (!rewriteDone) {
-                const rewrittenUrl = JSON.stringify(url)
+                const rewrittenUrl = JSON.stringify(browserUrl)
                 const s = isDynamicImport ? start : start - 1
                 const e = isDynamicImport ? end : end + 1
                 str().overwrite(s, e, rewrittenUrl, {
@@ -770,7 +742,13 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
 
       if (hasEnv && !isClassicWorker) {
         // inject import.meta.env
-        str().prepend(getEnv(ssr))
+        const runtimeBase =
+          !ssr &&
+          config.experimental.relativeDevBase &&
+          !('import.meta.env.BASE_URL' in (config.define ?? {}))
+            ? `import.meta.env.BASE_URL = new URL(${JSON.stringify(relativeDevUrl(config, '/', importerModule.url))}, import.meta.url).pathname;`
+            : ''
+        str().prepend(getEnv(ssr) + runtimeBase)
       }
 
       if (hasHMR && !ssr && !isClassicWorker) {
@@ -787,7 +765,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         )
         // inject hot context
         str().prepend(
-          `import { createHotContext as __vite__createHotContext } from "${clientPublicPath}";` +
+          `import { createHotContext as __vite__createHotContext } from "${relativeDevUrl(config, clientPublicPath, importerModule.url)}";` +
             `import.meta.hot = __vite__createHotContext(${JSON.stringify(
               normalizeHmrUrl(importerModule.url),
             )});`,
@@ -799,7 +777,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           str().append('\n' + __vite__injectQuery.toString())
         } else {
           str().prepend(
-            `import { injectQuery as __vite__injectQuery } from "${clientPublicPath}";`,
+            `import { injectQuery as __vite__injectQuery } from "${relativeDevUrl(config, clientPublicPath, importerModule.url)}";`,
           )
         }
       }

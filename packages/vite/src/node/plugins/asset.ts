@@ -12,6 +12,7 @@ import MagicString from 'magic-string'
 import colors from 'picocolors'
 import picomatch from 'picomatch'
 import { makeIdFiltersToMatchWithQuery } from 'rolldown/filter'
+import { relativeDevUrl, devUrlForId } from '../devUrl'
 import {
   createToImportMetaURLBasedRelativeRuntime,
   toOutputFilePathInJS,
@@ -231,7 +232,13 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
         }
 
         return {
-          code: `export default ${JSON.stringify(encodeURIPath(url))}`,
+          code:
+            config.command === 'serve' &&
+            config.experimental.relativeDevBase &&
+            this.environment.config.consumer === 'client' &&
+            url.startsWith('/')
+              ? `export default new URL(${JSON.stringify(relativeDevUrl(config, encodeURIPath(url), encodeURIPath(devUrlForId(this.environment, id))))}, import.meta.url).href`
+              : `export default ${JSON.stringify(encodeURIPath(url))}`,
           // Force rollup to keep this module from being shared between other entry points if it's an entrypoint.
           // If the resulting chunk is empty, it will be removed in generateBundle.
           moduleSideEffects:

@@ -8,7 +8,13 @@ import type {
   ResolvedConfig,
   ResolvedEnvironmentOptions,
 } from '../config'
-import { mergeConfig, monotonicDateNow } from '../utils'
+import { mergeConfig, monotonicDateNow, normalizePath } from '../utils'
+import {
+  CLIENT_ENTRY,
+  CLIENT_PUBLIC_PATH,
+  ENV_ENTRY,
+  ENV_PUBLIC_PATH,
+} from '../constants'
 import { fetchModule } from '../ssr/fetchModule'
 import type { DepsOptimizer } from '../optimizer'
 import { isDepOptimizationDisabled } from '../optimizer'
@@ -17,8 +23,9 @@ import {
   createExplicitDepsOptimizer,
 } from '../optimizer/optimizer'
 import { ERR_OUTDATED_OPTIMIZED_DEP } from '../../shared/constants'
-import { cleanUrl, promiseWithResolvers } from '../../shared/utils'
+import { cleanUrl, promiseWithResolvers, unwrapId } from '../../shared/utils'
 import type { ViteDevServer } from '../server'
+import { normalizeResolvedIdToUrl } from '../devUrl'
 import { EnvironmentModuleGraph } from './moduleGraph'
 import type { EnvironmentModuleNode } from './moduleGraph'
 import type {
@@ -139,6 +146,20 @@ export class DevEnvironment extends BaseEnvironment {
     this.moduleGraph = new EnvironmentModuleGraph(name, (url: string) =>
       this.pluginContainer!.resolveId(url, undefined),
     )
+    if (config.experimental.relativeDevBase && options.consumer === 'client') {
+      // One resolved ID shares one transform cache, so all browser requests
+      // must use the same URL as the relative imports in that transform.
+      this.moduleGraph._canonicalizeUrl = (url, resolved) => {
+        if (resolved.external) return url
+        const id = cleanUrl(resolved.id)
+        // The client derives its external prefix from /@vite/client.
+        if (id === normalizePath(CLIENT_ENTRY))
+          return CLIENT_PUBLIC_PATH + resolved.id.slice(id.length)
+        if (id === normalizePath(ENV_ENTRY))
+          return ENV_PUBLIC_PATH + resolved.id.slice(id.length)
+        return unwrapId(normalizeResolvedIdToUrl(this, url, resolved))
+      }
+    }
 
     this._crawlEndFinder = setupOnCrawlEnd()
 
