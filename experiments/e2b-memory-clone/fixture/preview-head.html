@@ -1,0 +1,15 @@
+<script>
+  const NativeWebSocket = window.WebSocket
+  window.WebSocket = class extends NativeWebSocket {
+    constructor(url, protocols) {
+      const target = new URL(url, location.href)
+      if (target.pathname === '/storybook-server-channel') {
+        target.pathname = new URL(
+          './storybook-server-channel',
+          location.href,
+        ).pathname
+      }
+      super(target.href, protocols)
+    }
+  }
+</script>

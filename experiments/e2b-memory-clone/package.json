@@ -1,0 +1,14 @@
+{
+  "name": "vite-e2b-memory-clone-verifier",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@e2b/code-interpreter": "2.6.0",
+    "playwright-chromium": "1.62.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "e2b": "2.28.0"
+    }
+  }
+}

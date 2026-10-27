@@ -102,11 +102,13 @@ browser regression now checks that acceptance updates without replacing the
 document. This is a local engineering assessment, not approval from Vite's
 maintainers.
 
-This fixture proves local relocation and isolation. It does **not** emulate an
-E2B process-memory snapshot, prove the full Fiddle integration, or replace the
-existing runtime identity safeguard. Real snapshot-clone verification remains
-necessary before removing that safeguard. Storybook's separate server-channel
-socket also needs its existing Fiddle adapter; Vite does not own that channel.
+This fixture proves local relocation and isolation. A separate
+[real E2B memory-clone run](experiments/e2b-memory-clone/RESULTS.md) now also
+passes Vite and Storybook preview/HMR/reload/reconnect checks without restarting
+their inherited servers. This does not prove the full deployed Fiddle integration
+or replace the existing runtime identity safeguard. Storybook's separate
+server-channel socket also needs its existing Fiddle adapter; Vite does not own
+that channel.
 
 A supplementary local Storybook 10.4.6 / React sample lives in the ignored
 `temp/storybook-relative/` directory. Its configuration links the patched Vite,
@@ -156,4 +158,30 @@ reproduced it, and both checks passed after restoring Vite's unwrapped virtual
 graph URLs. These are functional checks, not startup-performance measurements.
 
 The implementation remains local on this branch; no patch was pushed or
-published and no Fiddle runtime, repository, or deployment was modified.
+published and no existing Fiddle runtime, repository, or deployment was modified.
+The E2B experiment created its own fresh donor and clone, then cleaned up both
+sandboxes and their snapshot after preserving the evidence.
+
+## Install in generated preview workspaces
+
+The install target is each generated workspace's Storybook/preview package, such
+as Supabase's `packages/storybook/package.json`, which already uses Vite8.2.2.
+Replace its Vite dependency with the pinned fork tarball, update its lockfile,
+and enable the relative development configuration above. Keep `vite` imports
+and existing Storybook commands. Preserve the middleware WebSocket server and
+the separate Storybook channel adapter while removing startup-fixed browser
+origin/socket address overrides. This does not require changing Fiddle's web
+application build tool.
+The generated runtime wrapper must preserve the opt-in relative base and socket
+configuration rather than reapplying its legacy fixed address overrides.
+
+The exact E2B-tested package is saved locally as
+`temp/e2b-memory-clone/vite-8.2.2-fiddle.0a47270.tgz`, with a SHA256 checksum and
+SHA512-integrity manifest beside it. Its package metadata stays `vite@8.2.2`;
+the artifact filename and hash identify the fork. Nothing has been published to
+a registry or GitHub release. For shared installs, build from a pinned fork
+commit and attach the tarball to a tagged fork release; consumers can pin that
+release asset URL. Vite's repository root is a monorepo, and generated `dist`
+files are not committed, so a plain root Git dependency does not supply this
+installable artifact. Scope any deduplication override to the target preview
+workspace and its compatible Vite dependencies.
