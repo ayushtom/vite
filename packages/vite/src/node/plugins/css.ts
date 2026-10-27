@@ -2205,7 +2205,9 @@ async function relativeDevCssExpression(
 ): Promise<string> {
   if (!config.experimental.relativeDevBase) return JSON.stringify(css)
   const expressions: string[] = []
-  const marker = `__vite_relative_css_${getHash(id)}_`
+  let marker = `__vite_relative_css_${getHash(id)}_`
+  // Authored CSS must never be mistaken for a generated runtime URL.
+  while (css.includes(marker)) marker += '_'
   const rewrite = (url: string) => {
     const relative = relativeDevUrl(config, url, devUrlForId(environment, id))
     if (relative === url) return url

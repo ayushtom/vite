@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { expect, test } from 'vitest'
 import { TraceMap, originalPositionFor } from '@jridgewell/trace-mapping'
 import {
@@ -444,6 +445,42 @@ test.skipIf(isBuild).each([
         ),
       ).toBe(expected)
     } finally {
+      await tab.close()
+    }
+  },
+)
+
+test.skipIf(isBuild)(
+  'preserves authored CSS that resembles runtime URL placeholders',
+  async () => {
+    const file = path.join(roots[0], 'src/prefix-style.css')
+    const original = await fs.readFile(file, 'utf8')
+    const hash = createHash('sha256')
+      .update(file.split(path.sep).join('/'))
+      .digest('hex')
+      .slice(0, 8)
+    const literal = `__vite_relative_css_${hash}_0__`
+    const tab = await page.context().browser()!.newPage()
+    try {
+      await fs.writeFile(
+        file,
+        `.prefix-background::before { content: "${literal}"; } .prefix-background { background-image: url('/tile.svg?no-inline'); }`,
+      )
+      await tab.goto(gatewayUrl + '/_preview/a/prefix.html')
+      await expect
+        .poll(() =>
+          tab
+            .locator('.prefix-background')
+            .evaluate((el) => getComputedStyle(el, '::before').content),
+        )
+        .toBe(JSON.stringify(literal))
+      expect(
+        await tab
+          .locator('.prefix-background')
+          .evaluate((el) => getComputedStyle(el).backgroundImage),
+      ).toContain('/_preview/a/tile.svg')
+    } finally {
+      await fs.writeFile(file, original)
       await tab.close()
     }
   },
