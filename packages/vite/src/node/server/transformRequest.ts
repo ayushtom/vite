@@ -12,6 +12,7 @@ import type {
   SourceMap,
 } from 'rolldown'
 import { cleanUrl, slash, unwrapId } from '../../shared/utils'
+import { resolveRelativeDevUrl } from '../devUrl'
 import { checkPublicFile } from '../publicDir'
 import type { EnvironmentModuleNode } from '../server/moduleGraph'
 import { ssrTransform } from '../ssr/ssrTransform'
@@ -491,12 +492,13 @@ async function handleModuleSoftInvalidation(
       }
 
       const urlWithoutTimestamp = removeTimestampQuery(rawUrl)
+      const graphUrl = environment.getTopLevelConfig().experimental
+        .relativeDevBase
+        ? resolveRelativeDevUrl(urlWithoutTimestamp, mod.url)
+        : urlWithoutTimestamp
       // moduleUrl must be derived the same way as importAnalysis
       const moduleUrl = unwrapId(
-        stripBase(
-          removeImportQuery(urlWithoutTimestamp),
-          environment.config.base,
-        ),
+        stripBase(removeImportQuery(graphUrl), environment.config.base),
       )
       for (const importedMod of mod.importedModules) {
         if (importedMod.url !== moduleUrl) continue

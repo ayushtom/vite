@@ -26,6 +26,7 @@ import {
 } from '../build'
 import type { ResolvedConfig } from '../config'
 import { DEFAULT_ASSETS_INLINE_LIMIT, DEFAULT_ASSETS_RE } from '../constants'
+import { relativeDevUrl, devUrlForId } from '../devUrl'
 import type { Environment } from '../environment'
 import type { Plugin } from '../plugin'
 import { checkPublicFile } from '../publicDir'
@@ -283,11 +284,18 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
         }
 
         return {
-          code: `export default ${formatBuiltAsset(
-            resolved,
-            'js',
-            addFileUrlMetadataForAsset(this.environment, resolved, 'js'),
-          )}`,
+          code:
+            config.command === 'serve' &&
+            config.experimental.relativeDevBase &&
+            this.environment.config.consumer === 'client' &&
+            resolved.type === 'string' &&
+            resolved.value.startsWith('/')
+              ? `export default new URL(${JSON.stringify(relativeDevUrl(config, encodeURIPath(resolved.value), encodeURIPath(devUrlForId(this.environment, id))))}, import.meta.url).href`
+              : `export default ${formatBuiltAsset(
+                  resolved,
+                  'js',
+                  addFileUrlMetadataForAsset(this.environment, resolved, 'js'),
+                )}`,
           // Force rollup to keep this module from being shared between other entry points if it's an entrypoint.
           // If the resulting chunk is empty, it will be removed in generateBundle.
           moduleSideEffects:

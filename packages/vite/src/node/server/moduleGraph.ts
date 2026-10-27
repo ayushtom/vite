@@ -110,6 +110,9 @@ export class EnvironmentModuleGraph {
   _resolveId: (url: string) => Promise<PartialResolvedId | null>
 
   /** @internal */
+  _canonicalizeUrl?: (url: string, resolved: PartialResolvedId) => string
+
+  /** @internal */
   _hasResolveFailedErrorModules: Set<EnvironmentModuleNode> = new Set()
 
   constructor(
@@ -484,6 +487,10 @@ export class EnvironmentModuleGraph {
         }
       }
     }
-    return [url, resolvedId, resolved?.meta]
+    return [
+      this._canonicalizeUrl?.(url, resolved ?? { id: resolvedId }) ?? url,
+      resolvedId,
+      resolved?.meta,
+    ]
   }
 }

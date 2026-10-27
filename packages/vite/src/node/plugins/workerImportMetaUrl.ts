@@ -6,6 +6,7 @@ import type { ESTree } from 'rolldown/utils'
 import { stripLiteral } from 'strip-literal'
 import { cleanUrl, slash, splitFileAndPostfix } from '../../shared/utils'
 import type { ResolvedConfig } from '../config'
+import { relativeDevUrl, devUrlForId } from '../devUrl'
 import { createBackCompatIdResolver } from '../idResolver'
 import type { ResolveIdFn } from '../idResolver'
 import type { Plugin } from '../plugin'
@@ -290,6 +291,16 @@ export function workerImportMetaUrlPlugin(config: ResolvedConfig): Plugin {
                 `${builtUrlExpr}${queryPostfix}`,
                 `${WORKER_FILE_ID}&type=${workerType}`,
               )
+              if (
+                config.command === 'serve' &&
+                config.experimental.relativeDevBase
+              ) {
+                builtUrlExpr = relativeDevUrl(
+                  config,
+                  builtUrlExpr,
+                  devUrlForId(this.environment, id),
+                )
+              }
               builtUrlExpr = JSON.stringify(builtUrlExpr)
             }
             s.update(

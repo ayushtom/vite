@@ -5,10 +5,12 @@ import { stripLiteral } from 'strip-literal'
 import { cleanUrl, slash } from '../../shared/utils'
 import type { ResolvedConfig } from '../config'
 import { CLIENT_ENTRY } from '../constants'
+import { relativeDevUrl, devUrlForId } from '../devUrl'
 import { createBackCompatIdResolver } from '../idResolver'
 import type { ResolveIdFn } from '../idResolver'
 import type { Plugin } from '../plugin'
 import {
+  encodeURIPath,
   injectQuery,
   isDataUrl,
   isParentDirectory,
@@ -139,14 +141,24 @@ export function assetImportMetaUrlPlugin(config: ResolvedConfig): Plugin {
 
           // Get final asset URL. If the file does not exist,
           // we fall back to the initial URL and let it resolve in runtime
+          const relative =
+            config.command === 'serve' && config.experimental.relativeDevBase
           let builtUrlExpr: string | undefined
           if (file) {
             try {
               if (publicDir && isParentDirectory(publicDir, file)) {
                 const publicPath = '/' + path.posix.relative(publicDir, file)
-                builtUrlExpr = await fileToUrl(this, publicPath, 'js')
+                builtUrlExpr = await fileToUrl(
+                  this,
+                  publicPath,
+                  relative ? 'string' : 'js',
+                )
               } else {
-                builtUrlExpr = await fileToUrl(this, file, 'js')
+                builtUrlExpr = await fileToUrl(
+                  this,
+                  file,
+                  relative ? 'string' : 'js',
+                )
                 // during dev, builtUrl may point to a directory or a non-existing file
                 const watchFile = cleanUrl(file)
                 if (tryStatSync(watchFile)?.isFile()) {
@@ -163,7 +175,16 @@ export function assetImportMetaUrlPlugin(config: ResolvedConfig): Plugin {
               `\n${rawExp} doesn't exist at build time, it will remain unchanged to be resolved at runtime. ` +
                 `If this is intended, you can use the /* @vite-ignore */ comment to suppress this warning.`,
             )
-            builtUrlExpr = JSON.stringify(url)
+            builtUrlExpr = relative ? url : JSON.stringify(url)
+          }
+          if (relative) {
+            builtUrlExpr = JSON.stringify(
+              relativeDevUrl(
+                config,
+                encodeURIPath(builtUrlExpr),
+                encodeURIPath(devUrlForId(this.environment, id)),
+              ),
+            )
           }
           s.update(
             startIndex,

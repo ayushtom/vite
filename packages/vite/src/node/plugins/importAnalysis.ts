@@ -26,6 +26,7 @@ import {
   DEP_VERSION_RE,
   SPECIAL_QUERY_RE,
 } from '../constants'
+import { relativeDevUrl } from '../devUrl'
 import { shouldExternalize } from '../external'
 import {
   optimizedDepInfoFromFile,
@@ -577,6 +578,19 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           if (specifier !== undefined) {
             const resolved = await resolveImport(specifier, start)
             if (resolved?.external) {
+              if (
+                !ssr &&
+                specifier === clientPublicPath &&
+                config.experimental.relativeDevBase
+              ) {
+                str().overwrite(
+                  dynamicIndex > -1 ? start : start - 1,
+                  dynamicIndex > -1 ? end : end + 1,
+                  JSON.stringify(
+                    relativeDevUrl(config, specifier, importerModule.url),
+                  ),
+                )
+              }
               if (resolved.id !== specifier) {
                 str().overwrite(
                   isDynamicImport ? start : start - 1,
@@ -594,7 +608,13 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
               start,
             )
             const browserUrl = resolved
-              ? moduleUrlToBrowserUrl(moduleUrl, ssr ? '' : base)
+              ? ssr
+                ? moduleUrlToBrowserUrl(moduleUrl, '')
+                : relativeDevUrl(
+                    config,
+                    moduleUrlToBrowserUrl(moduleUrl, base),
+                    importerModule.url,
+                  )
               : specifier
             if (id != null) {
               config.safeModulePaths.add(cleanUrl(id))
@@ -777,7 +797,13 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
 
       if (hasEnv && !isClassicWorker) {
         // inject import.meta.env
-        str().prepend(getEnv(ssr))
+        const runtimeBase =
+          !ssr &&
+          config.experimental.relativeDevBase &&
+          !('import.meta.env.BASE_URL' in (config.define ?? {}))
+            ? `import.meta.env.BASE_URL = new URL(${JSON.stringify(relativeDevUrl(config, '/', importerModule.url))}, import.meta.url).pathname;`
+            : ''
+        str().prepend(getEnv(ssr) + runtimeBase)
       }
 
       if (hasHMR && !ssr && !isClassicWorker) {
@@ -794,7 +820,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         )
         // inject hot context
         str().prepend(
-          `import { createHotContext as __vite__createHotContext } from "${clientPublicPath}";` +
+          `import { createHotContext as __vite__createHotContext } from "${relativeDevUrl(config, clientPublicPath, importerModule.url)}";` +
             `import.meta.hot = __vite__createHotContext(${JSON.stringify(
               importerModule.url,
             )});`,
@@ -806,7 +832,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           str().append('\n' + __vite__injectQuery.toString())
         } else {
           str().prepend(
-            `import { injectQuery as __vite__injectQuery } from "${clientPublicPath}";`,
+            `import { injectQuery as __vite__injectQuery } from "${relativeDevUrl(config, clientPublicPath, importerModule.url)}";`,
           )
         }
       }

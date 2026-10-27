@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { init, parse as parseImports } from 'es-module-lexer'
 import MagicString from 'magic-string'
 import type { DefaultTreeAdapterMap, Token } from 'parse5'
 import type { SourceMapInput } from 'rolldown'
@@ -9,11 +10,14 @@ import type { PreviewServer, ResolvedConfig, ViteDevServer } from '../..'
 import { cleanUrl, moduleUrlToBrowserUrl } from '../../../shared/utils'
 import { getNodeAssetAttributes } from '../../assetSource'
 import { CLIENT_PUBLIC_PATH, FS_PREFIX } from '../../constants'
+import { relativeDevUrl } from '../../devUrl'
 import { getHmrImplementation } from '../../plugins/clientInjections'
+import { relativeDevCssUrls } from '../../plugins/css'
 import type { IndexHtmlTransformHook } from '../../plugins/html'
 import {
   addToHTMLProxyCache,
   applyHtmlTransforms,
+  escapeHtmlAttribute,
   extractImportExpressionFromClassicScript,
   findNeedTransformStyleAttribute,
   getScriptInfo,
@@ -84,6 +88,7 @@ export function createDevHtmlTransformFn(
     ...postHooks,
     injectNonceAttributeTagHook(config),
     postImportMapHook(config),
+    ...(config.experimental.relativeDevBase ? [relativeDevHtmlHook] : []),
   ]
   const pluginContext = new BasicMinimalPluginContext(
     { ...basePluginContextMeta, watchMode: true },
@@ -102,6 +107,87 @@ export function createDevHtmlTransformFn(
       originalUrl,
     })
   }
+}
+
+// Plugins such as React inject their preambles after devHtmlHook. Resolve
+// their browser-facing imports too, without changing module graph identities.
+const relativeDevHtmlHook: IndexHtmlTransformHook = async (html, context) => {
+  const config = context.server!.config
+  const importer = context.originalUrl || context.path
+  const s = new MagicString(html)
+  const styles: Promise<void>[] = []
+  await init
+  await traverseHtml(html, context.filename, config.logger.warn, (node) => {
+    if (!nodeIsElement(node)) return
+    if (node.attrs.some((attr) => attr.name === 'vite-ignore')) {
+      removeViteIgnoreAttr(s, node.sourceCodeLocation!)
+      return
+    }
+    if (node.nodeName === 'style' && node.childNodes.length) {
+      const text = node.childNodes[0] as DefaultTreeAdapterMap['textNode']
+      styles.push(
+        relativeDevCssUrls(text.value, config, importer).then((css) => {
+          s.update(
+            text.sourceCodeLocation!.startOffset,
+            text.sourceCodeLocation!.endOffset,
+            css,
+          )
+        }),
+      )
+    }
+    const inlineStyle = findNeedTransformStyleAttribute(node)
+    if (inlineStyle) {
+      styles.push(
+        relativeDevCssUrls(inlineStyle.attr.value, config, importer).then(
+          (css) => {
+            if (css !== inlineStyle.attr.value)
+              overwriteAttrValue(
+                s,
+                inlineStyle.location!,
+                escapeHtmlAttribute(css),
+              )
+          },
+        ),
+      )
+    }
+    const rewrite = (url: string) => relativeDevUrl(config, url, importer)
+    for (const attr of getNodeAssetAttributes(
+      node,
+      config.html?.additionalAssetSources,
+    )) {
+      if (attr.type === 'remove') continue
+      const url =
+        attr.type === 'srcset'
+          ? processSrcSetSync(attr.value, ({ url }) => rewrite(url))
+          : rewrite(attr.value)
+      if (url !== attr.value)
+        overwriteAttrValue(s, attr.location, escapeHtmlAttribute(url))
+    }
+    if (node.nodeName !== 'script') return
+    const { src, srcSourceCodeLocation, isModule, isIgnored } =
+      getScriptInfo(node)
+    if (isIgnored) return
+    if (src) {
+      const url = rewrite(src.value)
+      if (url !== src.value)
+        overwriteAttrValue(s, srcSourceCodeLocation!, escapeHtmlAttribute(url))
+    } else if (isModule && node.childNodes.length) {
+      const text = node.childNodes[0] as DefaultTreeAdapterMap['textNode']
+      const offset = text.sourceCodeLocation!.startOffset
+      for (const specifier of parseImports(text.value)[0]) {
+        if (!specifier.n) continue
+        const url = rewrite(specifier.n)
+        if (url === specifier.n) continue
+        s.update(
+          offset + specifier.s - (specifier.d === -1 ? 1 : 0),
+          offset + specifier.e + (specifier.d === -1 ? 1 : 0),
+          JSON.stringify(url),
+        )
+      }
+    }
+  })
+  await Promise.all(styles)
+  return s.toString()
 }
 
 function getHtmlFilename(url: string, server: ViteDevServer) {
@@ -192,7 +278,7 @@ const processNodeUrl = (
       }
     }
 
-    return url
+    return relativeDevUrl(config, url, originalUrl || htmlPath)
   }
 
   const processedUrl = useSrcSetReplacer
@@ -280,7 +366,7 @@ const devHtmlHook: IndexHtmlTransformHook = async (
     s.update(
       node.sourceCodeLocation!.startOffset,
       node.sourceCodeLocation!.endOffset,
-      `<script type="module" src="${browserUrl}"></script>`,
+      `<script type="module" src="${config.experimental.relativeDevBase ? escapeHtmlAttribute(relativeDevUrl(config, browserUrl, originalUrl || htmlPath)) : browserUrl}"></script>`,
     )
     preTransformRequest(server!, moduleUrl)
   }
@@ -296,7 +382,8 @@ const devHtmlHook: IndexHtmlTransformHook = async (
         getScriptInfo(node)
 
       if (isIgnored) {
-        removeViteIgnoreAttr(s, node.sourceCodeLocation!)
+        if (!config.experimental.relativeDevBase)
+          removeViteIgnoreAttr(s, node.sourceCodeLocation!)
       } else if (src) {
         const processedUrl = processNodeUrl(
           src.value,
@@ -308,7 +395,13 @@ const devHtmlHook: IndexHtmlTransformHook = async (
           !isModule,
         )
         if (processedUrl !== src.value) {
-          overwriteAttrValue(s, srcSourceCodeLocation!, processedUrl)
+          overwriteAttrValue(
+            s,
+            srcSourceCodeLocation!,
+            config.experimental.relativeDevBase
+              ? escapeHtmlAttribute(processedUrl)
+              : processedUrl,
+          )
         }
       } else if (isModule && node.childNodes.length) {
         addInlineModule(node, 'js')
@@ -361,7 +454,8 @@ const devHtmlHook: IndexHtmlTransformHook = async (
     )
     for (const attr of assetAttributes) {
       if (attr.type === 'remove') {
-        s.remove(attr.location.startOffset, attr.location.endOffset)
+        if (!config.experimental.relativeDevBase)
+          s.remove(attr.location.startOffset, attr.location.endOffset)
       } else {
         const processedUrl = processNodeUrl(
           attr.value,
@@ -371,7 +465,13 @@ const devHtmlHook: IndexHtmlTransformHook = async (
           originalUrl,
         )
         if (processedUrl !== attr.value) {
-          overwriteAttrValue(s, attr.location, processedUrl)
+          overwriteAttrValue(
+            s,
+            attr.location,
+            config.experimental.relativeDevBase
+              ? escapeHtmlAttribute(processedUrl)
+              : processedUrl,
+          )
         }
       }
     }
@@ -444,7 +544,11 @@ const devHtmlHook: IndexHtmlTransformHook = async (
         tag: 'script',
         attrs: {
           type: 'module',
-          src: path.posix.join(base, CLIENT_PUBLIC_PATH),
+          src: relativeDevUrl(
+            config,
+            path.posix.join(base, CLIENT_PUBLIC_PATH),
+            originalUrl || htmlPath,
+          ),
         },
         injectTo: 'head-prepend',
       },

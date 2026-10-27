@@ -19,6 +19,7 @@ import {
 } from '../build'
 import type { ResolvedConfig } from '../config'
 import { ENV_ENTRY, ENV_PUBLIC_PATH } from '../constants'
+import { relativeDevUrl, devUrlForId } from '../devUrl'
 import type { Environment } from '../environment'
 import type { Logger } from '../logger'
 import type { Plugin } from '../plugin'
@@ -709,7 +710,9 @@ export function webWorkerPlugin(config: ResolvedConfig): Plugin {
             `${url}${postfix}`,
             `${WORKER_FILE_ID}&type=${workerType}`,
           )
-          urlCode = JSON.stringify(url)
+          urlCode = config.experimental.relativeDevBase
+            ? `new URL(${JSON.stringify(relativeDevUrl(config, url, devUrlForId(this.environment, id)))}, import.meta.url).href`
+            : JSON.stringify(url)
         }
 
         if (urlRE.test(id)) {
@@ -743,8 +746,15 @@ export function webWorkerPlugin(config: ResolvedConfig): Plugin {
 
           if (workerType === 'classic') {
             // base needs to be joined as the base is not injected to `importScripts` automatically
+            const envUrl = path.posix.join(config.base, ENV_PUBLIC_PATH)
             const scriptPath = JSON.stringify(
-              path.posix.join(config.base, ENV_PUBLIC_PATH),
+              config.command === 'serve' && config.experimental.relativeDevBase
+                ? relativeDevUrl(
+                    config,
+                    envUrl,
+                    devUrlForId(this.environment, id),
+                  )
+                : envUrl,
             )
             injectEnv = `importScripts(${scriptPath})\n`
           } else if (workerType === 'module') {
