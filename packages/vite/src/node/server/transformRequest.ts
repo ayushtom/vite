@@ -26,6 +26,7 @@ import {
 } from '../utils'
 import { ssrTransform } from '../ssr/ssrTransform'
 import { checkPublicFile } from '../publicDir'
+import { resolveRelativeDevUrl } from '../devUrl'
 import { cleanUrl, slash, unwrapId } from '../../shared/utils'
 import {
   applySourcemapIgnoreList,
@@ -491,12 +492,13 @@ async function handleModuleSoftInvalidation(
       }
 
       const urlWithoutTimestamp = removeTimestampQuery(rawUrl)
+      const graphUrl = environment.getTopLevelConfig().experimental
+        .relativeDevBase
+        ? resolveRelativeDevUrl(urlWithoutTimestamp, mod.url)
+        : urlWithoutTimestamp
       // hmrUrl must be derived the same way as importAnalysis
       const hmrUrl = unwrapId(
-        stripBase(
-          removeImportQuery(urlWithoutTimestamp),
-          environment.config.base,
-        ),
+        stripBase(removeImportQuery(graphUrl), environment.config.base),
       )
       for (const importedMod of mod.importedModules) {
         if (importedMod.url !== hmrUrl) continue

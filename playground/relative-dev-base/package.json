@@ -1,0 +1,8 @@
+{
+  "name": "@vitejs/test-relative-dev-base",
+  "private": true,
+  "version": "0.0.0",
+  "devDependencies": {
+    "@jridgewell/trace-mapping": "^0.3.31"
+  }
+}

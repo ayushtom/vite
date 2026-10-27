@@ -592,6 +592,12 @@ export interface FutureOptions {
 }
 
 export interface ExperimentalOptions {
+  /** Emit browser-relative development URLs for mounting behind a path-stripping proxy.
+   * Requires base: './' or ''. Does not change canonical server module IDs.
+   * @experimental
+   * @default false
+   */
+  relativeDevBase?: boolean
   /**
    * Append fake `&lang.(ext)` when queries are specified, to preserve the file extension for following plugins to process.
    *
@@ -874,6 +880,7 @@ const configDefaults = Object.freeze({
   },
   /** @experimental */
   experimental: {
+    relativeDevBase: false,
     importGlobRestoreExtension: false,
     renderBuiltUrl: undefined,
     hmrPartialAccept: false,
@@ -1814,6 +1821,20 @@ export async function resolveConfig(
   // resolve public base url
   const relativeBaseShortcut = config.base === '' || config.base === './'
 
+  if (!isBuild && config.experimental?.relativeDevBase) {
+    if (
+      !relativeBaseShortcut ||
+      config.experimental.bundledDev ||
+      config.isBundled ||
+      config.environments?.client?.isBundled ||
+      config.server?.origin
+    ) {
+      throw new Error(
+        'experimental.relativeDevBase requires a relative base, unbundled development, and no server.origin',
+      )
+    }
+  }
+
   // During dev, we ignore relative base and fallback to '/'
   // For the SSR build, relative base isn't possible by means
   // of import.meta.url.
@@ -1863,6 +1884,19 @@ export async function resolveConfig(
 
   const input = normalizeInput(config.input)
   const server = await resolveServerOptions(resolvedRoot, config.server, logger)
+
+  if (!isBuild && config.experimental?.relativeDevBase) {
+    const ws = server.ws
+    if (
+      ws &&
+      typeof ws === 'object' &&
+      (ws.host || ws.port != null || ws.clientPort != null || ws.protocol)
+    ) {
+      throw new Error(
+        'experimental.relativeDevBase derives the WebSocket address from the browser; configure only ws.path or ws.server',
+      )
+    }
+  }
 
   const builder = resolveBuilderOptions(config.builder)
 

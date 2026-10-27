@@ -2,6 +2,7 @@ import path from 'node:path'
 import MagicString from 'magic-string'
 import { stripLiteral } from 'strip-literal'
 import { exactRegex } from 'rolldown/filter'
+import { relativeDevUrl, devUrlForId } from '../devUrl'
 import type { Plugin } from '../plugin'
 import type { ResolvedConfig } from '../config'
 import {
@@ -163,6 +164,16 @@ export function assetImportMetaUrlPlugin(config: ResolvedConfig): Plugin {
                 `If this is intended, you can use the /* @vite-ignore */ comment to suppress this warning.`,
             )
             builtUrl = url
+          }
+          if (
+            config.command === 'serve' &&
+            config.experimental.relativeDevBase
+          ) {
+            builtUrl = relativeDevUrl(
+              config,
+              builtUrl,
+              devUrlForId(this.environment, id),
+            )
           }
           s.update(
             startIndex,

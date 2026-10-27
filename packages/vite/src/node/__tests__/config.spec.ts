@@ -23,6 +23,50 @@ import { createLogger } from '../logger'
 import type { Logger } from '../logger'
 import { isWindows } from '../../shared/utils'
 
+describe('relative development base', () => {
+  test('keeps internal base canonical while opting into browser-relative URLs', async () => {
+    const relative = await resolveConfig(
+      {
+        configFile: false,
+        base: './',
+        experimental: { relativeDevBase: true },
+      },
+      'serve',
+    )
+    expect(relative.base).toBe('/')
+    expect(relative.experimental.relativeDevBase).toBe(true)
+    const defaults = await resolveConfig(
+      { configFile: false, base: './' },
+      'serve',
+    )
+    expect(defaults.base).toBe('/')
+    expect(defaults.experimental.relativeDevBase).toBe(false)
+  })
+
+  test('rejects settings that would bake in a fixed browser location or bypass the module pipeline', async () => {
+    for (const incompatible of [
+      { base: '/fixed/' },
+      { server: { origin: 'https://donor.example' } },
+      { server: { ws: { host: 'donor.example' } } },
+      { server: { hmr: { host: 'donor.example' } } },
+      { server: { ws: { port: 0 } } },
+      { environments: { client: { isBundled: true } } },
+    ]) {
+      await expect(
+        resolveConfig(
+          {
+            configFile: false,
+            base: './',
+            ...incompatible,
+            experimental: { relativeDevBase: true },
+          },
+          'serve',
+        ),
+      ).rejects.toThrow('relativeDevBase')
+    }
+  })
+})
+
 describe('mergeConfig', () => {
   test('handles configs with different alias schemas', () => {
     const baseConfig = defineConfig({

@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" href="/link.css" />
+    <style>
+      .inline-background {
+        background-image: url('/tile.svg?no-inline');
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="initial-entity-style"
+      style="
+        background-image: url(&#39;/tile.svg?no-inline&amp;literal=&amp;copy;&#39;);
+      "
+      data-preserved="yes"
+    ></div>
+    <div class="inline-background">inline</div>
+    <div id="inline-attr" style="background-image: url('/tile.svg?no-inline')">
+      attribute
+    </div>
+    <h1 id="message"></h1>
+    <div id="virtual"></div>
+    <div id="lazy"></div>
+    <div id="worker"></div>
+    <div id="classic"></div>
+    <div class="background">asset</div>
+    <img id="image" />
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

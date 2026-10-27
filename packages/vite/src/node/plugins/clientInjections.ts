@@ -123,6 +123,10 @@ async function createClientConfigValueReplacer(
 
   return (code) =>
     code
+      .replace(
+        /__RELATIVE_DEV_BASE__/g,
+        escapeReplacement(config.experimental.relativeDevBase),
+      )
       .replace(`__MODE__`, modeReplacement)
       .replace(/__BASE__/g, baseReplacement)
       .replace(`__SERVER_HOST__`, serverHostReplacement)
@@ -130,7 +134,7 @@ async function createClientConfigValueReplacer(
       .replace(`__HMR_HOSTNAME__`, hmrHostnameReplacement)
       .replace(`__HMR_PORT__`, hmrPortReplacement)
       .replace(`__HMR_DIRECT_TARGET__`, hmrDirectTargetReplacement)
-      .replace(`__HMR_BASE__`, hmrBaseReplacement)
+      .replace(/__HMR_BASE__/g, hmrBaseReplacement)
       .replace(`__HMR_TIMEOUT__`, hmrTimeoutReplacement)
       .replace(`__HMR_ENABLE_OVERLAY__`, hmrEnableOverlayReplacement)
       .replace(`__HMR_CONFIG_NAME__`, hmrConfigNameReplacement)

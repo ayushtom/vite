@@ -53,6 +53,8 @@ import {
   SPECIAL_QUERY_RE,
 } from '../constants'
 import type { ResolvedConfig } from '../config'
+import type { Environment } from '../environment'
+import { relativeDevUrl, devUrlForId } from '../devUrl'
 import type { Plugin } from '../plugin'
 import { checkPublicFile } from '../publicDir'
 import {
@@ -96,7 +98,11 @@ import { type DevEnvironment } from '..'
 import type { PackageCache } from '../packages'
 import { findNearestMainPackageData } from '../packages'
 import { nodeResolveWithVite } from '../nodeResolve'
-import { addToHTMLProxyTransformResult, getImportMap } from './html'
+import {
+  addToHTMLProxyTransformResult,
+  getImportMap,
+  escapeHtmlAttribute,
+} from './html'
 import {
   assetUrlRE,
   cssEntriesMap,
@@ -554,6 +560,19 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
       },
       async handler(css, id) {
         css = stripBomTag(css)
+        if (
+          config.command === 'serve' &&
+          config.experimental.relativeDevBase &&
+          this.environment.config.consumer === 'client' &&
+          isDirectCSSRequest(id) &&
+          !htmlProxyRE.test(id)
+        ) {
+          css = await relativeDevCssUrls(
+            css,
+            config,
+            devUrlForId(this.environment, id),
+          )
+        }
 
         // cache css compile result to map
         // and then use the cache replace inline-style-flag
@@ -562,7 +581,10 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
         const isHTMLProxy = htmlProxyRE.test(id)
         if (inlineCSS && isHTMLProxy) {
           if (styleAttrRE.test(id)) {
-            css = css.replace(/"/g, '&quot;')
+            css =
+              config.command === 'serve' && config.experimental.relativeDevBase
+                ? escapeHtmlAttribute(css)
+                : css.replace(/"/g, '&quot;')
           }
           const index = htmlProxyIndexRE.exec(id)?.[1]
           if (index == null) {
@@ -606,10 +628,13 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
           }
 
           if (isDirectCSSRequest(id)) {
-            return null
+            return config.experimental.relativeDevBase &&
+              this.environment.config.consumer === 'client'
+              ? { code: css, map: null }
+              : null
           }
           if (inlined) {
-            return `export default ${JSON.stringify(css)}`
+            return `export default ${this.environment.config.consumer === 'server' ? JSON.stringify(css) : await relativeDevCssExpression(css, config, id, this.environment)}`
           }
           if (this.environment.config.consumer === 'server') {
             return modulesCode || 'export {}'
@@ -623,7 +648,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
                   path.posix.join(config.base, CLIENT_PUBLIC_PATH),
                 )}`,
             `const __vite__id = ${JSON.stringify(id)}`,
-            `const __vite__css = ${JSON.stringify(cssContent)}`,
+            `const __vite__css = ${await relativeDevCssExpression(cssContent, config, id, this.environment)}`,
             `__vite__updateStyle(__vite__id, __vite__css)`,
             // css modules exports change on edit so it can't self accept
             `${modulesCode || 'import.meta.hot.accept()'}`,
@@ -2161,6 +2186,45 @@ function rewriteCssUrls(
     const [matched, rawUrl] = match
     return await doUrlReplace(rawUrl.trim(), matched, replacer)
   })
+}
+
+export async function relativeDevCssUrls(
+  css: string,
+  config: ResolvedConfig,
+  importerUrl: string,
+): Promise<string> {
+  const rewrite = (url: string) => relativeDevUrl(config, url, importerUrl)
+  return rewriteCssImageSet(await rewriteCssUrls(css, rewrite), rewrite)
+}
+
+async function relativeDevCssExpression(
+  css: string,
+  config: ResolvedConfig,
+  id: string,
+  environment: Environment,
+): Promise<string> {
+  if (!config.experimental.relativeDevBase) return JSON.stringify(css)
+  const expressions: string[] = []
+  const marker = `__vite_relative_css_${getHash(id)}_`
+  const rewrite = (url: string) => {
+    const relative = relativeDevUrl(config, url, devUrlForId(environment, id))
+    if (relative === url) return url
+    const index =
+      expressions.push(
+        `new URL(${JSON.stringify(relative)}, import.meta.url).href` +
+          String.raw`.replace(/[()'\\]/g, c => '%' + c.charCodeAt(0).toString(16))`,
+      ) - 1
+    return `${marker}${index}__`
+  }
+  css = await rewriteCssImageSet(await rewriteCssUrls(css, rewrite), rewrite)
+  let expression = JSON.stringify(css)
+  for (const [index, value] of expressions.entries()) {
+    expression = expression.replace(
+      `${marker}${index}__`,
+      () => `" + ${value} + "`,
+    )
+  }
+  return expression
 }
 
 function rewriteCssDataUris(

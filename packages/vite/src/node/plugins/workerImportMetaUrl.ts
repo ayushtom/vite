@@ -4,6 +4,7 @@ import type { RollupError } from 'rolldown'
 import { parseAstAsync } from 'rolldown/parseAst'
 import { stripLiteral } from 'strip-literal'
 import type { ESTree } from 'rolldown/utils'
+import { relativeDevUrl, devUrlForId } from '../devUrl'
 import type { ResolvedConfig } from '../config'
 import type { Plugin } from '../plugin'
 import { evalValue, injectQuery, transformStableResult } from '../utils'
@@ -277,6 +278,16 @@ export function workerImportMetaUrlPlugin(config: ResolvedConfig): Plugin {
               builtUrl = injectQuery(
                 builtUrl,
                 `${WORKER_FILE_ID}&type=${workerType}`,
+              )
+            }
+            if (
+              config.command === 'serve' &&
+              config.experimental.relativeDevBase
+            ) {
+              builtUrl = relativeDevUrl(
+                config,
+                builtUrl,
+                devUrlForId(this.environment, id),
               )
             }
             s.update(

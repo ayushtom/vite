@@ -6,6 +6,7 @@ import type { Connect } from '#dep-types/connect'
 import type { ViteDevServer } from '..'
 import {
   createDebugger,
+  encodeURIPath,
   fsPathFromId,
   injectQuery,
   isCSSRequest,
@@ -28,12 +29,18 @@ import {
 } from '../../constants'
 import { isDirectCSSRequest, isDirectRequest } from '../../plugins/css'
 import { ERR_CLOSED_SERVER } from '../pluginContainer'
-import { cleanUrl, unwrapId, withTrailingSlash } from '../../../shared/utils'
+import {
+  cleanUrl,
+  unwrapId,
+  wrapId,
+  withTrailingSlash,
+} from '../../../shared/utils'
 import {
   ERR_OUTDATED_OPTIMIZED_DEP,
   NULL_BYTE_PLACEHOLDER,
 } from '../../../shared/constants'
 import type { ResolvedConfig } from '../../config'
+import { relativeDevUrl } from '../../devUrl'
 import { checkLoadingAccess, respondWithAccessDenied } from './static'
 
 const debugCache = createDebugger('vite:cache')
@@ -228,6 +235,38 @@ export function transformMiddleware(
         // Strip valid id prefix. This is prepended to resolved Ids that are
         // not valid browser import specifiers by the importAnalysis plugin.
         url = unwrapId(url)
+
+        if (server.config.experimental.relativeDevBase) {
+          const [canonicalUrl] = await environment.moduleGraph.resolveUrl(url)
+          if (cleanUrl(unwrapId(canonicalUrl)) !== cleanUrl(url)) {
+            const requested = new URL(req.url!, 'http://vite.dev')
+            const canonical = new URL(
+              encodeURIPath(
+                canonicalUrl.startsWith('/')
+                  ? canonicalUrl
+                  : wrapId(canonicalUrl),
+              ),
+              requested,
+            )
+            const canonicalKeys = new Set(canonical.searchParams.keys())
+            for (const [key, value] of requested.searchParams) {
+              if (!canonicalKeys.has(key))
+                canonical.searchParams.append(key, value)
+            }
+            // A relative Location preserves prefixes stripped by a proxy.
+            res.statusCode = 307
+            res.setHeader(
+              'Location',
+              relativeDevUrl(
+                server.config,
+                canonical.pathname + canonical.search,
+                requested.pathname,
+              ),
+            )
+            res.setHeader('Cache-Control', 'no-cache')
+            return res.end()
+          }
+        }
 
         // for CSS, we differentiate between normal CSS requests and imports
         if (isCSSRequest(url)) {

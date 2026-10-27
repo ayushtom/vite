@@ -4,6 +4,7 @@ import type { PluginContext, RolldownOutput, RollupError } from 'rolldown'
 import colors from 'picocolors'
 import { type ImportSpecifier, init, parse } from 'es-module-lexer'
 import { viteWebWorkerPostPlugin as nativeWebWorkerPostPlugin } from 'rolldown/experimental'
+import { relativeDevUrl, devUrlForId } from '../devUrl'
 import type { ResolvedConfig } from '../config'
 import type { Plugin } from '../plugin'
 import { ENV_ENTRY, ENV_PUBLIC_PATH } from '../constants'
@@ -524,7 +525,9 @@ export function webWorkerPlugin(config: ResolvedConfig): Plugin {
         } else {
           let url = await fileToUrl(this, cleanUrl(id))
           url = injectQuery(url, `${WORKER_FILE_ID}&type=${workerType}`)
-          urlCode = JSON.stringify(url)
+          urlCode = config.experimental.relativeDevBase
+            ? `new URL(${JSON.stringify(relativeDevUrl(config, url, devUrlForId(this.environment, id)))}, import.meta.url).href`
+            : JSON.stringify(url)
         }
 
         if (urlRE.test(id)) {
@@ -558,8 +561,15 @@ export function webWorkerPlugin(config: ResolvedConfig): Plugin {
 
           if (workerType === 'classic') {
             // base needs to be joined as the base is not injected to `importScripts` automatically
+            const envUrl = path.posix.join(config.base, ENV_PUBLIC_PATH)
             const scriptPath = JSON.stringify(
-              path.posix.join(config.base, ENV_PUBLIC_PATH),
+              config.command === 'serve' && config.experimental.relativeDevBase
+                ? relativeDevUrl(
+                    config,
+                    envUrl,
+                    devUrlForId(this.environment, id),
+                  )
+                : envUrl,
             )
             injectEnv = `importScripts(${scriptPath})\n`
           } else if (workerType === 'module') {
