@@ -272,6 +272,12 @@ export function getScriptInfo(node: DefaultTreeAdapterMap['element']): {
 
 const attrValueStartRE = /=\s*(.)/
 
+// Values read by the HTML parser are already entity-decoded. Escape once on
+// serialization, including delimiters used by quoted and unquoted attributes.
+export function escapeHtmlAttribute(value: string): string {
+  return value.replace(/[&"'<>`=\s]/g, (char) => `&#${char.charCodeAt(0)};`)
+}
+
 export function overwriteAttrValue(
   s: MagicString,
   sourceCodeLocation: Token.Location,

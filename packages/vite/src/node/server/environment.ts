@@ -10,6 +10,12 @@ import type {
   ResolvedConfig,
   ResolvedEnvironmentOptions,
 } from '../config'
+import {
+  CLIENT_ENTRY,
+  CLIENT_PUBLIC_PATH,
+  ENV_ENTRY,
+  ENV_PUBLIC_PATH,
+} from '../constants'
 import type { DepsOptimizer } from '../optimizer'
 import { isDepOptimizationDisabled } from '../optimizer'
 import {
@@ -18,7 +24,7 @@ import {
 } from '../optimizer/optimizer'
 import type { ViteDevServer } from '../server'
 import { fetchModule } from '../ssr/fetchModule'
-import { mergeConfig, monotonicDateNow } from '../utils'
+import { mergeConfig, monotonicDateNow, normalizePath } from '../utils'
 import { BundledDev } from './bundledDev'
 import type {
   HotChannel,
@@ -29,6 +35,7 @@ import { getShortName, normalizeHotChannel, updateModules } from './hmr'
 import { buildErrorMessage } from './middlewares/error'
 import { EnvironmentModuleGraph } from './moduleGraph'
 import type { EnvironmentModuleNode } from './moduleGraph'
+import { resolvedIdToModuleUrl } from './moduleUrl'
 import type { EnvironmentPluginContainer } from './pluginContainer'
 import {
   ERR_CLOSED_SERVER,
@@ -139,6 +146,20 @@ export class DevEnvironment extends BaseEnvironment {
     this.moduleGraph = new EnvironmentModuleGraph(name, (url: string) =>
       this.pluginContainer!.resolveId(url, undefined),
     )
+    if (config.experimental.relativeDevBase && options.consumer === 'client') {
+      // One resolved ID shares one transform cache, so all browser requests
+      // must use the same URL as the relative imports in that transform.
+      this.moduleGraph._canonicalizeUrl = (url, resolved) => {
+        if (resolved.external) return url
+        const id = cleanUrl(resolved.id)
+        // The client derives its external prefix from /@vite/client.
+        if (id === normalizePath(CLIENT_ENTRY))
+          return CLIENT_PUBLIC_PATH + resolved.id.slice(id.length)
+        if (id === normalizePath(ENV_ENTRY))
+          return ENV_PUBLIC_PATH + resolved.id.slice(id.length)
+        return resolvedIdToModuleUrl(this, resolved.id)
+      }
+    }
 
     this._crawlEndFinder = setupOnCrawlEnd()
 

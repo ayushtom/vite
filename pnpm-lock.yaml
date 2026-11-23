@@ -1621,6 +1621,12 @@ importers:
 
   playground/proxy-hmr/other-app: {}
 
+  playground/relative-dev-base:
+    devDependencies:
+      '@jridgewell/trace-mapping':
+        specifier: ^0.3.31
+        version: 0.3.31
+
   playground/resolve:
     dependencies:
       '@babel/runtime':

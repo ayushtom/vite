@@ -5,10 +5,12 @@ import { stripLiteral } from 'strip-literal'
 import { cleanUrl, slash } from '../../shared/utils'
 import type { ResolvedConfig } from '../config'
 import { CLIENT_ENTRY } from '../constants'
+import { devUrlForId, relativeDevUrl } from '../devUrl'
 import { createBackCompatIdResolver } from '../idResolver'
 import type { ResolveIdFn } from '../idResolver'
 import type { Plugin } from '../plugin'
 import {
+  encodeURIPath,
   injectQuery,
   isDataUrl,
   isParentDirectory,
@@ -140,13 +142,24 @@ export function assetImportMetaUrlPlugin(config: ResolvedConfig): Plugin {
           // Get final asset URL. If the file does not exist,
           // we fall back to the initial URL and let it resolve in runtime
           let builtUrlExpr: string | undefined
+          // With relative development URLs the served URL is written relative to this module.
+          const urlExpr = async (target: string) =>
+            config.command === 'serve' && config.experimental.relativeDevBase
+              ? JSON.stringify(
+                  relativeDevUrl(
+                    config,
+                    encodeURIPath(await fileToUrl(this, target, 'string')),
+                    encodeURIPath(devUrlForId(this.environment, id)),
+                  ),
+                )
+              : fileToUrl(this, target, 'js')
           if (file) {
             try {
               if (publicDir && isParentDirectory(publicDir, file)) {
                 const publicPath = '/' + path.posix.relative(publicDir, file)
-                builtUrlExpr = await fileToUrl(this, publicPath, 'js')
+                builtUrlExpr = await urlExpr(publicPath)
               } else {
-                builtUrlExpr = await fileToUrl(this, file, 'js')
+                builtUrlExpr = await urlExpr(file)
                 // during dev, builtUrl may point to a directory or a non-existing file
                 const watchFile = cleanUrl(file)
                 if (tryStatSync(watchFile)?.isFile()) {

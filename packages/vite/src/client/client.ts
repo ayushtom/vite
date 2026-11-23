@@ -15,6 +15,7 @@ import '@vite/env'
 
 // injected by the hmr plugin when served
 declare const __BASE__: string
+declare const __RELATIVE_DEV_BASE__: boolean
 declare const __SERVER_HOST__: string
 declare const __HMR_PROTOCOL__: string | null
 declare const __HMR_HOSTNAME__: string | null
@@ -35,11 +36,15 @@ const serverHost = __SERVER_HOST__
 const socketProtocol =
   __HMR_PROTOCOL__ || (importMetaUrl.protocol === 'https:' ? 'wss' : 'ws')
 const hmrPort = __HMR_PORT__
-const socketHost = `${__HMR_HOSTNAME__ || importMetaUrl.hostname}:${
-  hmrPort || importMetaUrl.port
-}${__HMR_BASE__}`
+export const base = __RELATIVE_DEV_BASE__
+  ? new URL('../', importMetaUrl).pathname
+  : __BASE__ || '/'
+const socketHost = __RELATIVE_DEV_BASE__
+  ? importMetaUrl.host + base + __HMR_BASE__.replace(/^\//, '')
+  : `${__HMR_HOSTNAME__ || importMetaUrl.hostname}:${
+      hmrPort || importMetaUrl.port
+    }${__HMR_BASE__}`
 const directSocketHost = __HMR_DIRECT_TARGET__
-export const base = __BASE__ || '/'
 const hmrTimeout = __HMR_TIMEOUT__
 const wsToken = __WS_TOKEN__
 const forwardConsole = __SERVER_FORWARD_CONSOLE__
@@ -61,7 +66,7 @@ export const transport = normalizeModuleRunnerTransport(
           await wsTransport.connect(handlers)
         } catch (e) {
           // only use fallback when port is inferred and was not connected before to prevent confusion
-          if (!hmrPort) {
+          if (!hmrPort && !__RELATIVE_DEV_BASE__) {
             wsTransport = createWebSocketModuleRunnerTransport({
               createConnection: () =>
                 new WebSocket(

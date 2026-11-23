@@ -26,6 +26,7 @@ import {
 } from '../build'
 import type { ResolvedConfig } from '../config'
 import { DEFAULT_ASSETS_INLINE_LIMIT, DEFAULT_ASSETS_RE } from '../constants'
+import { devUrlForId, relativeDevUrl } from '../devUrl'
 import type { Environment } from '../environment'
 import type { Plugin } from '../plugin'
 import { checkPublicFile } from '../publicDir'
@@ -282,12 +283,25 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
           }
         }
 
+        // A served asset URL is resolved against the module that imports it, so the
+        // export keeps working when the page is loaded below another path prefix.
+        const servedUrl =
+          config.command === 'serve' &&
+          config.experimental.relativeDevBase &&
+          this.environment.config.consumer === 'client' &&
+          resolved.type === 'string' &&
+          resolved.value.startsWith('/')
+            ? resolved.value
+            : undefined
+
         return {
-          code: `export default ${formatBuiltAsset(
-            resolved,
-            'js',
-            addFileUrlMetadataForAsset(this.environment, resolved, 'js'),
-          )}`,
+          code: servedUrl
+            ? `export default new URL(${JSON.stringify(relativeDevUrl(config, encodeURIPath(servedUrl), encodeURIPath(devUrlForId(this.environment, id))))}, import.meta.url).href`
+            : `export default ${formatBuiltAsset(
+                resolved,
+                'js',
+                addFileUrlMetadataForAsset(this.environment, resolved, 'js'),
+              )}`,
           // Force rollup to keep this module from being shared between other entry points if it's an entrypoint.
           // If the resulting chunk is empty, it will be removed in generateBundle.
           moduleSideEffects:
